@@ -5,10 +5,13 @@ verify_ssl = true
 
 [dev-packages]
 pytest = "*"
+unittest = "*"
 
 [packages]
 py4j = "*"
 javabridge = "*"
+jpype1 = "*"
+unittest = "*"
 
 [requires]
 python_version = "3.8"

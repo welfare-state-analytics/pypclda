@@ -1,39 +1,55 @@
+import os
+import pypclda.utility as utility
+import jpype
+import jpype.imports
+from jpype.types import *
 
-import javabridge
+logger = utility.get_logger()
 
-jint = lambda i: javabridge.make_instance('java/lang/Integer', '(I)V', i)
-jdbl = lambda d: javabridge.make_instance('java/lang/Double', '(D)V', d)
+PCPLDA_JAR_PATH = os.path.join(os.getcwd(), "lib", "PCPLDA-8.5.1.jar")
+
+jpype.startJVM(classpath=[PCPLDA_JAR_PATH], convertStrings=False)
+
+cc = jpype.JPackage("cc")
+java = jpype.JPackage("java")
+
 
 def get_util():
-    util = javabridge.JClassWrapper("cc.mallet.util.LDAUtils")
+    util = cc.mallet.util.LDAUtils()
     return util
+
+def get_logging_utils(output_path=None):
+    logging_util = cc.mallet.util.LoggingUtils()
+    if not output_path is None:
+        logging_util.checkAndCreateCurrentLogDir(JString(output_path))
+    return logging_util
 
 def create_simple_lda_config(**kwargs):
     """Creates a new LDA config file
 
     Parameters
     ----------
-       dataset_fn [type]
+       dataset_filename string
             filename of dataset (in LDA format)
-        nr_topics [type]
+        nr_topics int
             number of topics to use
-        alpha [type]
+        alpha float
             symmetric alpha prior
-        beta [type]
+        beta float
             symmetric beta prior
-        iterations [type]
+        iterations int
             number of iterations to sample
         rareword_threshold [type]
             min. number of occurences of a word to be kept
-        optim_interval [type]
+        optim_interval int
             how often to do hyperparameter optimization (default is off = -1)
-        stoplist_fn [type]
+        stoplist_filename string
             filenname of stoplist file (one word per line) (default "stoplist.txt")
-        topic_interval [type]
+        topic_interval int
             how often to print topic info during sampling
-        tmpdir [type]
+        tmpdir string
             temporary directory for intermediate storage of logging data (default "tmp")
-        topic_priors [type]
+        topic_priors string
             text file with 'prior spec' with one topic per line with format: <topic nr(zero idxed)>, <word1>, <word2>, etc
 
     Returns
@@ -43,99 +59,63 @@ def create_simple_lda_config(**kwargs):
 
     """
 
-    lu = javabridge.JClassWrapper("cc.mallet.util.LoggingUtils")()
-    fp = lu.checkAndCreateCurrentLogDir(kwargs.get("tmpdir", "/tmp"))
+    timestamp = utility.get_timestamp2()
+    output_path = os.path.join("output", f"run_{timestamp}", "")
 
-    slc = javabridge.JClassWrapper("cc.mallet.configuration.SimpleLDAConfiguration")()
+    slc = cc.mallet.configuration.SimpleLDAConfiguration()
 
-    slc.setLoggingUtil(lu)
+    slc.setLoggingUtil(get_logging_utils(output_path))
 
-    slc.setNoTopics(kwargs.get("nr_topics", 20))
-    slc.setAlpha(jdbl(kwargs.get("alpha", 0.01)))
-    slc.setBeta(jdbl(kwargs.get("beta", kwargs.get("nr_topics", 20) / 50.0)))
-    slc.setNoIters(jint(kwargs.get("iterations", 2000)))
-    slc.setRareThreshold(jint(kwargs.get("rareword_threshold", 10)))
-    slc.setTopicInterval(jint(kwargs.get("topic_interval", 10)))
-    slc.setStartDiagnostic(jint(90))
-    slc.setNoBatches(jint(5))
-    slc.setStoplistFilename(kwargs.get("stoplist_fn", "stoplist.txt"))
-    slc.setTopicPriorFilename(kwargs.get("topic_priors", "stoplist.txt"))
-    slc.setDatasetFilename(kwargs.get("dataset_fn", "dataset_fn.txt"))
-    slc.setHyperparamOptimInterval(jint(kwargs.get("optim_interval", -1)))
+    slc.setAlpha(java.lang.Double(kwargs.get("alpha", 0.01)))
+    slc.setBeta(java.lang.Double(kwargs.get("beta", kwargs.get("nr_topics", 20) / 50.0)))
+    slc.setDatasetFilename(kwargs.get("dataset_filename", "corpus.txt"))
+    slc.setHyperparamOptimInterval(java.lang.Integer(kwargs.get("optim_interval", -1)))
+    slc.setNoBatches(java.lang.Integer(5))
+    slc.setNoIters(java.lang.Integer(kwargs.get("iterations", 2000)))
     slc.setNoPreprocess(kwargs.get("no_preprocess", True))
+    slc.setNoTopics(kwargs.get("nr_topics", 20))
+    slc.setRareThreshold(java.lang.Integer(kwargs.get("rareword_threshold", 10)))
+    slc.setStartDiagnostic(java.lang.Integer(90))
+    slc.setStoplistFilename(kwargs.get("stoplist_filename", "stoplist.txt"))
+    slc.setTopicInterval(java.lang.Integer(kwargs.get("topic_interval", 10)))
+    slc.setTopicPriorFilename(kwargs.get("topic_priors", "topic_priors.txt"))
+
+    if "experiment_output_directory" in kwargs:
+        slc.setExperimentOutputDirectory(kwargs.get("experiment_output_directory", "output"))
+
+    if "corpus_filename" in kwargs:
+        slc.setSaveCorpus(True)
+        slc.setCorpusFilename(kwargs.get("corpus_filename", "corpus.txt"))
+
+    if "vocabulary_filename" in kwargs:
+        slc.setSaveVocabulary(True)
+        slc.setVocabularyFn(kwargs.get("vocabulary_filename", "vocabulary.txt"))
+
+    if "document_topic_means_filename" in kwargs:
+        slc.setSaveDocumentTopicMeans(True)
+        slc.setDocumentTopicMeansOutputFilename(kwargs.get("document_topic_means_filename", "document_topic_means.txt"))
+
+    if "phi_means_output_filename" in kwargs:
+        slc.setSavePhi(True)
+        slc.setPhiMeansOutputFilename(kwargs.get("phi_means_output_filename", "phi_means.txt"))
+
+    if "doc_lengths_filename" in kwargs:
+        slc.setSaveDocLengths(True)
+        slc.setDocLengthsFilename(kwargs.get("doc_lengths_filename", "doc_lengths.txt"))
+
+    if "document_topic_theta_output_filename" in kwargs:
+        slc.setSaveDocumentTopicTheta(True)
+        slc.setDocumentTopicThetaOutputFilename(kwargs.get("document_topic_theta_output_filename", "document_topic_theta.txt"))
+
+    if "sampler_folder" in kwargs:
+        slc.setSavedSamplerDirectory("stored_sampler")
+
+    if "save_term_frequencies" in kwargs:
+        slc.setSaveTermFrequencies(kwargs["save_term_frequencies"])
+
+    logger.info("Logging to: " + output_path)
 
     return slc
-
-
-def load_lda_dataset(filename, lda_config):
-    """Loads an LDA dataset from file.
-
-        The file should be in LDA format i.e.:
-            <unique id> <tab> <doc-class> <tab> <document content> <nl>
-        The document class is not used in by the LDA sampler. Each line
-        must be concluded with a newline so all other newlines in the
-        document must be removed. The document content CAN have \\t in it.
-
-    Parameters
-    ----------
-    filename : [type]
-        filename of dataset
-    lda_config : cc.mallet.configuration.SimpleLDAConfiguration
-        LDA config object
-
-    Returns
-    -------
-    [type]
-        [description]
-    """
-
-    util = javabridge.JClassWrapper("cc.mallet.util.LDAUtils")
-
-    ds = util.loadDataset(lda_config, filename)
-
-    return ds
-
-def load_lda_sampler(lda_config, store_dir="stored_samplers"):
-    """Load an LDA sampler from file.
-
-    Parameters
-    ----------
-    lda_config : cc.mallet.configuration.SimpleLDAConfiguration
-        LDA config object
-    store_dir : str, optional
-        directory name containing stored sampler, by default "stored_samplers"
-
-    Returns
-    -------
-    LDASampler
-        LDA sampler object
-
-    Raises
-    ------
-    FileNotFoundError
-        [description]
-    """
-    util = javabridge.JClassWrapper("cc.mallet.util.LDAUtils")
-
-    # Load the stored sampler
-    ss = util.loadStoredSampler(lda_config, store_dir)
-
-    if ss is None:
-        raise FileNotFoundError()
-
-    samplerType = ss.getClass().getName()
-
-    # Create the new sampler
-    #try:
-    lda = javabridge.JClassWrapper(samplerType)(lda_config)
-    #except:
-    #    raise
-
-    # Init the new sampler from the stored sampler
-    lda.initFrom(ss) # cast to "cc.mallet.topics.LDAGibbsSampler"
-
-    return lda
-
 
 def create_lda_dataset(train_corpus, test_corpus=None, stoplist_filename="stoplist.txt"):
     """ Create an LDA dataset from existing string vector.
@@ -160,23 +140,105 @@ def create_lda_dataset(train_corpus, test_corpus=None, stoplist_filename="stopli
         [description]
     """
 
-    train_corpus_iterator = javabridge.JClassWrapper("cc.mallet.util.StringClassArrayIterator")(train_corpus)
-    util = javabridge.JClassWrapper("cc.mallet.util.LDAUtils")
+    train_corpus_iterator = cc.mallet.util.StringClassArrayIterator(train_corpus)
+    util = cc.mallet.util.LDAUtils()
     pipe = util.buildSerialPipe(stoplist_filename, None, True)
-    instances = javabridge.JClassWrapper("cc.mallet.types.InstanceList")(pipe)
+    instances = cc.mallet.types.InstanceList(pipe)
     instances.addThruPipe(train_corpus_iterator)
 
     if test_corpus is not None:
-        train_corpus_iterator = javabridge.JClassWrapper("cc.mallet.util.StringClassArrayIterator")(test_corpus)
+        train_corpus_iterator = cc.mallet.util.StringClassArrayIterator(test_corpus)
         vocabulary = instances.getAlphabet()
         test_pipe = util.buildSerialPipe(stoplist_filename, vocabulary, True)
-        test_instances = javabridge.JClassWrapper("cc.mallet.types.InstanceList")(pipe)
+        test_instances = cc.mallet.types.InstanceList(pipe)
         test_instances.addThruPipe(train_corpus_iterator)
         return list(train=instances, test=test_instances)
 
     return instances
 
-def sample_pclda(lda_config, ds, iterations=2000, samplerType="cc.mallet.topics.PolyaUrnSpaliasLDA", testset=None, save_sampler=True):
+def load_lda_dataset(filename, lda_config):
+    """Loads an LDA dataset from file.
+
+        The file should be in LDA format i.e.:
+            <unique id> <tab> <doc-class> <tab> <document content> <nl>
+        The document class is not used in by the LDA sampler. Each line
+        must be concluded with a newline so all other newlines in the
+        document must be removed. The document content CAN have \\t in it.
+
+    Parameters
+    ----------
+    filename : [type]
+        filename of dataset
+    lda_config : cc.mallet.configuration.SimpleLDAConfiguration
+        LDA config object
+
+    Returns
+    -------
+    list of list of str
+        [description]
+    """
+
+    util = get_util()
+
+    ds = cc.mallet.util.LDAUtils.loadDataset(lda_config, filename)
+
+    return ds
+
+def create_lda_sampler_of_type_with_factory(lda_config, model_class_name):
+    factory = cc.mallet.configuration.ModelFactory
+    return factory.get(lda_config, JString(model_class_name))
+
+def create_lda_sampler_of_type(lda_config, sampler_type):
+
+    lda_sampler_class = java.lang.Class.forName(sampler_type)
+
+    constructor = lda_sampler_class \
+        .getConstructor(cc.mallet.configuration.LDAConfiguration)
+
+    lda_sampler = constructor.newInstance(lda_config)
+
+    gibbs_sampler = jpype.JObject(lda_sampler, cc.mallet.topics.LDAGibbsSampler)
+
+    return gibbs_sampler
+
+create_lda_sampler = create_lda_sampler_of_type
+
+def load_lda_sampler(lda_config, stored_dir="stored_samplers"):
+    """Load an LDA sampler from file.
+
+    Parameters
+    ----------
+    lda_config : cc.mallet.configuration.SimpleLDAConfiguration
+        LDA config object
+    store_dir : str, optional
+        directory name containing stored sampler, by default "stored_samplers"
+
+    Returns
+    -------
+    LDASampler
+        LDA sampler object
+
+    Raises
+    ------
+    FileNotFoundError
+        [description]
+    """
+
+    # Load the stored sampler
+    stored_lda_sampler = get_util().loadStoredSampler(lda_config, stored_dir)
+
+    if stored_lda_sampler is None:
+        raise FileNotFoundError()
+
+    sampler_type = stored_lda_sampler.getClass().getName()
+    lda = create_lda_sampler_of_type(sampler_type)
+
+    # Init the new sampler from the stored sampler
+    lda.initFrom(stored_lda_sampler) # cast to "cc.mallet.topics.LDAGibbsSampler"
+
+    return lda
+
+def sample_pclda(lda_config, ds, iterations=2000, sampler_type="cc.mallet.topics.PolyaUrnSpaliasLDA", testset=None, save_sampler=True):
     """Run the PCLDA (default Polya Urn) sampler
 
     Parameters
@@ -199,22 +261,21 @@ def sample_pclda(lda_config, ds, iterations=2000, samplerType="cc.mallet.topics.
     LDASampler
         LDA sampler object
     """
-    lda = javabridge.JClassWrapper(samplerType)(lda_config)
+    lda_sampler = create_lda_sampler_of_type(lda_config, sampler_type)
 
-    lda.addInstances(ds)
+    lda_sampler.addInstances(ds)
 
     if testset is not None:
-        lda.addTestInstances(testset)
+        lda_sampler.addTestInstances(testset)
 
-    lda.sample(jint(iterations))
+    lda_sampler.sample(java.lang.Integer(iterations))
 
     if save_sampler:
         sampler_dir = "stored_samplers" # J("cc.mallet.configuration.LDAConfiguration")$STORED_SAMPLER_DIR_DEFAULT
         samplerFolder = lda_config.getSavedSamplerDirectory(sampler_dir)
-        util = javabridge.JClassWrapper("cc.mallet.util.LDAUtils")
-        util.saveSampler(lda, lda_config, samplerFolder)
+        cc.mallet.util.LDAUtils().saveSampler(lda_sampler, lda_config, samplerFolder)
 
-    return lda
+    return lda_sampler
 
 def sample_pclda_continue(lda,  iterations = 2000):
     """Continue sampling using a trained sampler
@@ -231,7 +292,7 @@ def sample_pclda_continue(lda,  iterations = 2000):
     [type]
         [description]
     """
-    lda.sample(jint(iterations))
+    lda.sample(java.lang.Integer(iterations))
     return lda
 
 def print_top_words(word_matrix):
@@ -399,9 +460,9 @@ def get_topwords(lda,nr_words=20):
     nrTopics = lda.getNoTopics()
 
     tw = util.getTopWords(
-                jint(nr_words),
-                jint(alphSize),
-                jint(nrTopics),
+                java.lang.Integer(nr_words),
+                java.lang.Integer(alphSize),
+                java.lang.Integer(nrTopics),
                 typeTopicMatrix, #dispatch = T),
                 alph) #,
                 # simplify = TRUE)
@@ -427,15 +488,15 @@ def get_top_relevance_words(lda, config, nr_words=20, lambda_value=0.6):
     typeTopicMatrix = lda.getTypeTopicMatrix() # ", simplify = TRUE)
     alphSize = alph.size()
     nrTopics = lda.getNoTopics()
-    beta = config.getBeta(jdbl(0.01)).doubleValue()
+    beta = config.getBeta(java.lang.Double(0.01)).doubleValue()
 
     rw = util.getTopRelevanceWords(
-                jint(nr_words),
-                jint(alphSize),
-                jint(nrTopics),
+                java.lang.Integer(nr_words),
+                java.lang.Integer(alphSize),
+                java.lang.Integer(nrTopics),
                 typeTopicMatrix, #dispatch = T),
-                jdbl(beta),
-                jdbl(lambda_value),
+                java.lang.Double(beta),
+                java.lang.Double(lambda_value),
                 alph) #,
                 # simplify = TRUE)
     rw
@@ -502,3 +563,16 @@ def get_held_out_log_likelihood(lda):
 #   J("java.lang.Runtime")$getRuntime()$gc()
 #   invisible()
 # }
+
+
+def print_build_info():
+    pass
+    # print("We have: ?? processors avaiable")
+    # buildVer = LoggingUtils.getManifestInfo("Implementation-Build","PCPLDA")
+    # implVer  = LoggingUtils.getManifestInfo("Implementation-Version", "PCPLDA")
+    # if buildVer==None or implVer==None:
+    #     System.out.println("GIT info:" + LoggingUtils.getLatestCommit());
+    # } else {
+    #     System.out.println("Build info:"
+    #             + "Implementation-Build = " + buildVer + ", "
+    #             + "Implementation-Version = " + implVer);
