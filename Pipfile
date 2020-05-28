@@ -5,13 +5,17 @@ verify_ssl = true
 
 [dev-packages]
 pytest = "*"
-unittest = "*"
 
 [packages]
 py4j = "*"
 javabridge = "*"
 jpype1 = "*"
-unittest = "*"
+jupyterlab = "*"
+notebook = "*"
+jupyter = "*"
+itertoolz = "*"
+toolz = "*"
+pandas = "*"
 
 [requires]
 python_version = "3.8"
