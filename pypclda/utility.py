@@ -62,7 +62,7 @@ def options2args(options):
     # "sch",    "scheme",             true,  "sampling scheme " );
     # "cf",     "run_cfg",            true,  "full path to the RunConfiguration file " );
 
-def get_logger(level=logging.DEBUG, log_path=None, prefix="", suffix="console_output"):
+def get_logger(level=logging.DEBUG, log_folder=None, prefix="", suffix="console_output"):
 
     # PrintStream logOut = new PrintStream(new FileOutputStream(logFile, true));
     # PrintStream teeStdOut = new TeeStream(System.out, logOut);
@@ -74,8 +74,8 @@ def get_logger(level=logging.DEBUG, log_path=None, prefix="", suffix="console_ou
     logger = logging.getLogger('pypclda')
     logger.setLevel(level)
 
-    if log_path is not None:
-        log_file = os.path.join(log_path, f"{prefix}_{suffix}.log")
+    if log_folder is not None:
+        log_file = os.path.join(log_folder, f"{prefix}_{suffix}.log")
 
         logger.info("FIXME: set log file handler")
 

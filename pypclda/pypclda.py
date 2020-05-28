@@ -1,5 +1,9 @@
 import os
+import types
+import numpy as np
+import toolz
 import pypclda.utility as utility
+import pypclda.config_default as config_default
 import jpype
 import jpype.imports
 from jpype.types import *
@@ -13,15 +17,16 @@ jpype.startJVM(classpath=[PCPLDA_JAR_PATH], convertStrings=False)
 cc = jpype.JPackage("cc")
 java = jpype.JPackage("java")
 
+lda_util = cc.mallet.util.LDAUtils()
 
-def get_util():
-    util = cc.mallet.util.LDAUtils()
-    return util
+get_util = lambda: lda_util
+jint = lambda n: java.lang.Integer(n)
+jdbl = lambda d: java.lang.Double(d)
 
-def get_logging_utils(output_path=None):
+def create_logging_utils(output_folder=None):
     logging_util = cc.mallet.util.LoggingUtils()
-    if not output_path is None:
-        logging_util.checkAndCreateCurrentLogDir(JString(output_path))
+    if not output_folder is None:
+        logging_util.checkAndCreateCurrentLogDir(JString(output_folder))
     return logging_util
 
 def create_simple_lda_config(**kwargs):
@@ -29,7 +34,7 @@ def create_simple_lda_config(**kwargs):
 
     Parameters
     ----------
-       dataset_filename string
+        dataset_filename string
             filename of dataset (in LDA format)
         nr_topics int
             number of topics to use
@@ -47,7 +52,7 @@ def create_simple_lda_config(**kwargs):
             filenname of stoplist file (one word per line) (default "stoplist.txt")
         topic_interval int
             how often to print topic info during sampling
-        tmpdir string
+        tmp_folder string
             temporary directory for intermediate storage of logging data (default "tmp")
         topic_priors string
             text file with 'prior spec' with one topic per line with format: <topic nr(zero idxed)>, <word1>, <word2>, etc
@@ -55,16 +60,22 @@ def create_simple_lda_config(**kwargs):
     Returns
     -------
     cc.mallet.configuration.SimpleLDAConfiguration
-        [description]
 
     """
 
     timestamp = utility.get_timestamp2()
-    output_path = os.path.join("output", f"run_{timestamp}", "")
+    output_folder = os.path.join("output", f"run_{timestamp}", "")
+    log_folder = os.path.join(output_folder, "log", "")
+    tmp_folder = kwargs.get("tmp_folder", "/tmp")
+
+    logging_util = create_logging_utils(tmp_folder)
 
     slc = cc.mallet.configuration.SimpleLDAConfiguration()
 
-    slc.setLoggingUtil(get_logging_utils(output_path))
+    slc.setLoggingUtil(logging_util)
+
+    if "experiment_output_directory" in kwargs:
+        slc.setExperimentOutputDirectory(kwargs.get("experiment_output_directory", None) or "output")
 
     slc.setAlpha(java.lang.Double(kwargs.get("alpha", 0.01)))
     slc.setBeta(java.lang.Double(kwargs.get("beta", kwargs.get("nr_topics", 20) / 50.0)))
@@ -79,9 +90,6 @@ def create_simple_lda_config(**kwargs):
     slc.setStoplistFilename(kwargs.get("stoplist_filename", "stoplist.txt"))
     slc.setTopicInterval(java.lang.Integer(kwargs.get("topic_interval", 10)))
     slc.setTopicPriorFilename(kwargs.get("topic_priors", "topic_priors.txt"))
-
-    if "experiment_output_directory" in kwargs:
-        slc.setExperimentOutputDirectory(kwargs.get("experiment_output_directory", "output"))
 
     if "corpus_filename" in kwargs:
         slc.setSaveCorpus(True)
@@ -108,12 +116,12 @@ def create_simple_lda_config(**kwargs):
         slc.setDocumentTopicThetaOutputFilename(kwargs.get("document_topic_theta_output_filename", "document_topic_theta.txt"))
 
     if "sampler_folder" in kwargs:
-        slc.setSavedSamplerDirectory("stored_sampler")
+        slc.setSavedSamplerDirectory(kwargs["sampler_folder"])
 
     if "save_term_frequencies" in kwargs:
         slc.setSaveTermFrequencies(kwargs["save_term_frequencies"])
 
-    logger.info("Logging to: " + output_path)
+    logger.info("Logging to: " + output_folder)
 
     return slc
 
@@ -121,9 +129,11 @@ def create_lda_dataset(train_corpus, test_corpus=None, stoplist_filename="stopli
     """ Create an LDA dataset from existing string vector.
 
         Each entry in the vector must be a string with the following format:
-            <unique id>\\t<doc class>\\t<document content>
+
+            unique-id TAB `doc-class` TAB tokens....
+
         The document class is not used in by the LDA sampler.
-        The document content CAN have \\t in it.
+        The document content CAN have TAB in it.
 
     Parameters
     ----------
@@ -156,7 +166,7 @@ def create_lda_dataset(train_corpus, test_corpus=None, stoplist_filename="stopli
 
     return instances
 
-def load_lda_dataset(filename, lda_config):
+def load_lda_dataset(filename, config):
     """Loads an LDA dataset from file.
 
         The file should be in LDA format i.e.:
@@ -167,48 +177,71 @@ def load_lda_dataset(filename, lda_config):
 
     Parameters
     ----------
-    filename : [type]
+    filename : str
         filename of dataset
-    lda_config : cc.mallet.configuration.SimpleLDAConfiguration
+    config : cc.mallet.configuration.SimpleLDAConfiguration
         LDA config object
 
     Returns
     -------
     list of list of str
-        [description]
+        The loaded dataset
     """
 
-    util = get_util()
-
-    ds = cc.mallet.util.LDAUtils.loadDataset(lda_config, filename)
+    ds = cc.mallet.util.LDAUtils.loadDataset(config, filename)
 
     return ds
 
-def create_lda_sampler_of_type_with_factory(lda_config, model_class_name):
-    factory = cc.mallet.configuration.ModelFactory
-    return factory.get(lda_config, JString(model_class_name))
-
-def create_lda_sampler_of_type(lda_config, sampler_type):
-
-    lda_sampler_class = java.lang.Class.forName(sampler_type)
-
-    constructor = lda_sampler_class \
-        .getConstructor(cc.mallet.configuration.LDAConfiguration)
-
-    lda_sampler = constructor.newInstance(lda_config)
-
-    gibbs_sampler = jpype.JObject(lda_sampler, cc.mallet.topics.LDAGibbsSampler)
-
-    return gibbs_sampler
-
-create_lda_sampler = create_lda_sampler_of_type
-
-def load_lda_sampler(lda_config, stored_dir="stored_samplers"):
-    """Load an LDA sampler from file.
+def create_lda_sampler_of_type_with_factory(config, sampler_type):
+    """Creates sampler with factory
 
     Parameters
     ----------
-    lda_config : cc.mallet.configuration.SimpleLDAConfiguration
+    config : LDAConfiguration
+        The sampler's configuration
+    sampler_type : str
+        Sampler's Java type
+
+    Returns
+    -------
+    GibbsLDASampler
+        The new sampler.
+    """
+    factory = cc.mallet.configuration.ModelFactory
+    return factory.get(config, JString(sampler_type))
+
+def create_lda_sampler_of_type(config, sampler_type):
+    """Creates sample of given type using constructor ctor(LDAConfiguration)
+
+    Parameters
+    ----------
+    config : LDAConfiguration
+        The sampler's configuration
+    model_class_name : str
+        Sampler's Java type
+
+    Returns
+    -------
+    GibbsLDASampler
+        The new sampler.
+    """
+    sampler_class = java.lang.Class.forName(sampler_type)
+
+    constructor = sampler_class \
+        .getConstructor(cc.mallet.configuration.LDAConfiguration)
+
+    sampler = constructor.newInstance(config)
+
+    return sampler
+
+create_lda_sampler = create_lda_sampler_of_type
+
+def load_lda_sampler(config, stored_dir="stored_samplers"):
+    """Load a previously saved LDA sampler from disk.
+
+    Parameters
+    ----------
+    config : cc.mallet.configuration.SimpleLDAConfiguration
         LDA config object
     store_dir : str, optional
         directory name containing stored sampler, by default "stored_samplers"
@@ -218,34 +251,44 @@ def load_lda_sampler(lda_config, stored_dir="stored_samplers"):
     LDASampler
         LDA sampler object
 
-    Raises
-    ------
-    FileNotFoundError
-        [description]
     """
 
     # Load the stored sampler
-    stored_lda_sampler = get_util().loadStoredSampler(lda_config, stored_dir)
+    stored_lda_sampler = cc.mallet.util.LDAUtils.loadStoredSampler(config, stored_dir)
 
     if stored_lda_sampler is None:
         raise FileNotFoundError()
 
     sampler_type = stored_lda_sampler.getClass().getName()
-    lda = create_lda_sampler_of_type(sampler_type)
+    sampler = create_lda_sampler_of_type(config, sampler_type)
 
     # Init the new sampler from the stored sampler
-    lda.initFrom(stored_lda_sampler) # cast to "cc.mallet.topics.LDAGibbsSampler"
+    sampler.initFrom(stored_lda_sampler) # cast to "cc.mallet.topics.LDAGibbsSampler"
 
-    return lda
+    return sampler
 
-def sample_pclda(lda_config, ds, iterations=2000, sampler_type="cc.mallet.topics.PolyaUrnSpaliasLDA", testset=None, save_sampler=True):
+def save_lda_sampler(sampler, config):
+    """Saves an LDA sampler to disk
+
+    Parameters
+    ----------
+    sampler : GibbsLDASampler
+        The sampler to save
+    config : LDAConfiguration
+        Sampler's configuration
+    """
+    default_folder = config_default.STORED_SAMPLER_DIR_DEFAULT
+    sampler_folder = config.getSavedSamplerDirectory(default_folder)
+    cc.mallet.util.LDAUtils().saveSampler(sampler, config, sampler_folder)
+
+def sample_pclda(config, dataset, iterations=2000, sampler_type="cc.mallet.topics.PolyaUrnSpaliasLDA", testset=None, save_sampler=True):
     """Run the PCLDA (default Polya Urn) sampler
 
     Parameters
     ----------
-    lda_config : [type]
+    config : [type]
         LDA config object
-    ds : [type]
+    dataset : [type]
         LDA dataset
     iterations : int, optional
         number of iterations to run, by default 2000
@@ -261,42 +304,413 @@ def sample_pclda(lda_config, ds, iterations=2000, sampler_type="cc.mallet.topics
     LDASampler
         LDA sampler object
     """
-    lda_sampler = create_lda_sampler_of_type(lda_config, sampler_type)
+    sampler = create_lda_sampler_of_type(config, sampler_type)
+    casted_sampler = jpype.JObject(sampler, cc.mallet.topics.LDAGibbsSampler) # enable access to `sample` function
 
-    lda_sampler.addInstances(ds)
+    sampler.addInstances(dataset)
 
     if testset is not None:
-        lda_sampler.addTestInstances(testset)
+        sampler.addTestInstances(testset)
 
-    lda_sampler.sample(java.lang.Integer(iterations))
+    casted_sampler.sample(java.lang.Integer(iterations))
 
     if save_sampler:
-        sampler_dir = "stored_samplers" # J("cc.mallet.configuration.LDAConfiguration")$STORED_SAMPLER_DIR_DEFAULT
-        samplerFolder = lda_config.getSavedSamplerDirectory(sampler_dir)
-        cc.mallet.util.LDAUtils().saveSampler(lda_sampler, lda_config, samplerFolder)
+        save_lda_sampler(sampler, config)
 
-    return lda_sampler
+    return sampler
 
-def sample_pclda_continue(lda,  iterations = 2000):
+def sample_pclda_continue(sampler,  iterations = 2000):
     """Continue sampling using a trained sampler
 
     Parameters
     ----------
-    lda : LDASampler
+    sampler : LDASampler
         LDA sampler
     iterations : int, optional
-        [description]how many iterations to sample, by default 2000
+        Number of sample iterations, default 2000
+
+    Returns
+    -------
+    [type]
+        The loaded sampler
+    """
+    sampler.sample(java.lang.Integer(iterations))
+    return sampler
+
+def extract_vocabulary(alphabet):
+    """[summary] Extract the vocabulary as a string vector from an MALLET Alphabet
+
+    Parameters
+    ----------
+    alphabet : Alphabet
+        Java MALLET Alphabet object, obtained by 'get_alphabet(sampler)'
+
+    Returns
+    -------
+    [type]
+        Vocabulary
+    """
+    return cc.mallet.util.LDAUtils().extractVocabulaty(alphabet)
+
+def extract_token_counts(dataset):
+    """Extract how many times each token occurs. Same order as the vocabulary
+
+    Parameters
+    ----------
+    dataset : [type]
+        The dataset to query
+
+    Returns
+    -------
+    "[I" list of integers
+        token counts
+    """
+    return cc.mallet.util.LDAUtils.extractTermCounts(dataset)
+
+def extract_doc_lengths(dataset):
+    """Extract the the number of tokens in each document.
+        Same order as the documents
+
+    Parameters
+    ----------
+    dataset : [type]
+        the dataset to query
+
+    Returns
+    -------
+    "[I"
+        Array of integers, number of tokens in each document
+    """
+    return cc.mallet.util.LDAUtils.extractDocLength(dataset)
+
+def get_alphabet(sampler):
+    """Get the Alphabet (as a java object) from an LDA sampler
+
+    Parameters
+    ----------
+    sampler : [type]
+        the dataset to query
+
+    Returns
+    -------
+        Lcc/mallet/types/Alphabet
+    """
+    return sampler.getAlphabet()
+
+def get_token_topic_matrix(sampler):
+    """Extracts the token/topic matrix from and LDA sampler
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+
+    Returns
+    -------
+     m x n integer matrix, where m is #tokens and n is #topics
+        and (i,j) is count of token i sampled to topic j
+     """
+    ttm = sampler.getTypeTopicMatrix()
+    return ttm
+
+def get_document_topic_matrix(sampler):
+    """Extracts document/topic matrix (counts)
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+    Returns
+    -------
+    m x n integer matrix, where m is #tokens and n is #topics
+        and (i,j) is count of topic j sampled to doc i   """
+
+    dtm = sampler.getDocumentTopicMatrix()
+
+    return dtm
+
+def get_topic_token_phi_matrix(sampler):
+    """Get the word/topic distribution (phi matrix) from an LDA sampler
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+
+    Returns
+    -------
+    [[D
+        Phi matrix
+    """
+    phi = sampler.getPhi()
+    return phi
+
+def calculate_token_probs(type_topic_counts, beta):
+    """Computes token's overall probability
+
+    Parameters
+    ----------
+     type_topic_counts : int[][]
+        LDA type/topic counts
+    beta : double
+        beta value
+
+    Returns
+    -------
+     m double array, where m is #tokens
+        and (i) is word i's probability
+    """
+    n_topics = len(type_topic_counts[0])
+    n_tokens = len(type_topic_counts)
+
+    total_mass = np.sum(type_topic_counts, dtype=np.float64) + (n_topics * n_tokens) * beta
+    token_total_mass = np.sum(type_topic_counts, axis=1, dtype=np.float64) + n_topics * beta
+
+    token_probs = token_total_mass / total_mass
+
+    return token_probs
+
+def calculate_token_probs_given_topic(type_topic_counts, beta):
+    """Compute token's probability given topic.
+
+    This is a port of LDAUtil.calcWordProbGivenTopic()
+
+    Parameters
+    ----------
+    type_topic_counts : int[][]
+        LDA type/topic counts
+    beta : double
+        beta value
+
+    Returns
+    -------
+     m x n double matrix, where m is #tokens and n is #topics
+        and (i, j) is word i's probability given topic j
+    """
+    n_topics = len(type_topic_counts[0])
+    n_tokens = len(type_topic_counts)
+
+    topic_mass = np.sum(type_topic_counts, axis=0, dtype=np.float64) + n_tokens * beta
+
+    p_w_k = (np.array(type_topic_counts, dtype=np.float64) + beta) / \
+                    topic_mass[np.newaxis, :]
+
+    return p_w_k
+
+def calculate_token_relevance_matrix(type_topic_counts_matrix, beta, _lambda):
+    """Calculates token relevances matix.
+
+    This is a port of cc.mallet.util.LDAUtils.getTopRelevanceWords
+
+    Parameters
+    ----------
+    type_topic_counts : int[][]
+        LDA type/topic counts
+    beta : double
+        beta value used by sampler
+    _lambda : double
+        lambda value used in calculation
 
     Returns
     -------
     [type]
         [description]
     """
-    lda.sample(java.lang.Integer(iterations))
-    return lda
+
+    n_topics = len(type_topic_counts_matrix[0])
+    n_types  = len(type_topic_counts_matrix)
+
+    p_w_k    = calculate_token_probs_given_topic(type_topic_counts_matrix, beta)
+    p_w      = calculate_token_probs(type_topic_counts_matrix , beta)
+
+    relevance_matrix = [
+        _lambda * np.log(p_w_k[:,topic]) + (1 - _lambda) * (np.log(p_w_k[:,topic]) - np.log(p_w))
+            for topic in range(0, n_topics)
+    ]
+
+    return relevance_matrix
+
+def calculate_top_relevance_tokens(n_top_tokens, type_topic_counts_matrix, beta, _lambda, alphabet):
+
+    n_topics = len(type_topic_counts_matrix[0])
+    n_types  = len(type_topic_counts_matrix)
+    n_top_tokens = min(n_top_tokens, n_types)
+
+    relevance_matrix = np.array(
+        calculate_token_relevance_matrix(type_topic_counts_matrix, beta, _lambda)
+    )
+
+    sorted_indices = relevance_matrix.argsort(axis=1)
+
+    sorted_matrix = relevance_matrix[
+        np.arange(np.shape(relevance_matrix)[0])[:,np.newaxis],
+        sorted_indices
+    ]
+
+    sliced_indices = np.flip(sorted_indices[:,-n_top_tokens:], axis=1)
+    sliced_matrix = np.flip(sorted_matrix[:,-n_top_tokens:], axis=1)
+
+    descending_token_relevances = (
+        (alphabet.lookupObject(w[1]), w[0])
+            for w in zip(
+                    sliced_matrix.ravel(),
+                    sliced_indices.ravel()
+                )
+    )
+    return [
+        [ w for w in row ]
+            for row in toolz.partition(n_top_tokens, descending_token_relevances)
+    ]
+
+def get_top_topic_tokens(sampler, n_words=20):
+    """Get the top words per topic from an LDA sampler
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+    n_words : int, optional
+        Number of top words per topic to return, default 20
+
+    Returns
+    -------
+    "[[Ljava/lang/String;"
+        Per topic top words matrix
+    """
+    alphabet = sampler.getAlphabet()
+    word_topic_matrix = sampler.getTypeTopicMatrix()
+    alphabet_size = alphabet.size()
+    n_topics = sampler.getNoTopics()
+
+    top_topic_words = cc.mallet.util.LDAUtils.getTopWords(
+                jint(n_words),
+                jint(alphabet_size),
+                jint(n_topics),
+                word_topic_matrix, #dispatch = T),
+                alphabet)
+
+    return top_topic_words
+
+def get_theta_estimate(sampler):
+    """Get an estimate of the document topic distribution
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+
+    Returns
+    -------
+    "[[D"
+        The theta matrix) from an LDA sampler
+    """
+    theta = sampler.getThetaEstimate(sampler) # ,simplify = TRUE)
+    return theta
+
+def get_z_means(sampler):
+    """Get the mean of the topic indicators from an LDA sampler
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+
+    Returns
+    -------
+    "[[D"
+    """
+    zb = sampler.getZbar(sampler) # ,simplify = TRUE)
+    return zb
+
+def get_top_topic_word_relevances(sampler, config, n_top_words=20, v_lambda=None):
+    """Get the 'top relevance words' (weighted version of top words) per topic from an LDA sampler
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+    config : LDAConfiguration
+        LDA config object
+    n_words : int, optional
+        Number of (top) words per topic to retrieve, default 20
+    lambda_value : float, optional
+        Lambda value to use when calculating the relevance, default 0.6
+    """
+
+    relevance_words = cc.mallet.util.LDAUtils.getTopRelevanceWords(
+        jint(n_top_words),
+        sampler.getAlphabet().size(),
+        sampler.getNoTopics(),
+        sampler.getTypeTopicMatrix(),
+        config.getBeta(config_default.BETA_DEFAULT),
+        jdbl(v_lambda) if v_lambda is not None else config.getLambda(config_default.LAMBDA_DEFAULT),
+        sampler.getAlphabet()
+    )
+    return relevance_words
+
+def calculate_type_topic_matrix_density(type_topic_matrix):
+    """Calculate the density (sparsity) of the type topic matrix
+
+    Parameters
+    ----------
+    type_topic_matrix : [type]
+        Type topic matrix, obtained by 'get_type_topics(sampler)'
+
+    Returns
+    -------
+    [type]
+        [description]
+    """
+    return cc.mallet.util.LDAUtils.calculateMatrixDensity(type_topic_matrix) # ,dispatch = T)
+
+def get_log_likelihood(sampler):
+    """Extract the log likelihood for each iteration
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler, the trained LDA sampler
+
+    Returns
+    -------
+    Double
+        Log likelihood
+    """
+    log_likelihood = sampler.getLogLikelihood(simplify=True)
+    return log_likelihood
+
+def get_held_out_log_likelihood(sampler):
+    """Extracts the heldout log likelihood for each iteration.
+    The sampler must have been run with a test set
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler, the trained LDA sampler
+
+    Returns
+    -------
+    Double
+        Log likelihood for test set
+    """
+    ll = sampler.getHeldOutLogLikelihood(simplify=True)
+    return ll
+
+def get_buid_version():
+    """Returns build information (build, version, commit)
+
+    Returns
+    -------
+        SimpleNamespace instance
+    """
+    return types.SimpleNamespace(
+        build=cc.mallet.util.getManifestInfo("Implementation-Build","PCPLDA"),
+        version=cc.mallet.util.getManifestInfo("Implementation-Version","PCPLDA"),
+        commit=cc.mallet.util.getLatestCommit()
+    )
 
 def print_top_words(word_matrix):
-    """Print the 'top words' from a sampled word matrix obtained using 'get_topwords(lda)'
+    """Print the 'top words' from a sampled word matrix obtained using 'get_topwords(sampler)'
 
     Parameters
     ----------
@@ -308,271 +722,8 @@ def print_top_words(word_matrix):
     [type]
         [description]
     """
-    util = get_util()
+    util = cc.mallet.util.LDAUtils
 
     # Vad betder $? Och är dispatch = t lik med transpose
     return None # util.formatTopWords(.jarray(word_matrix,dispatch = T))
 
-def extract_vocabulary(alphabet):
-    """[summary] Extract the vocabulary as a string vector from an MALLET Alphabet
-
-    Parameters
-    ----------
-    alphabet : Alphabet
-        Java MALLET Alphabet object, obtained by 'get_alphabet(lda)'
-
-    Returns
-    -------
-    [type]
-        Vocabulary
-    """
-    util = get_util()
-    return util.extractVocabulat(alphabet)
-
-def extract_term_counts(instances):
-    """Extract how many times each word occurs. Same order as the vocabulary
-
-    Parameters
-    ----------
-    instances : [type]
-        The dataset to query
-
-    Returns
-    -------
-    "[I"
-        Word counts
-    """
-    util = get_util()
-    return util.extractTermCounts(instances)
-
-def extract_doc_lengths(instances):
-    """Extract the the number of tokens in each document. Same order as the documents
-
-    Parameters
-    ----------
-    instances : [type]
-        the dataset to query
-
-    Returns
-    -------
-    "[I"
-        Array of integers, number of tokens in each document
-    """
-    util = get_util()
-    return util.extractDocLength(instances)
-
-def get_alphabet(lda):
-    """Get the Alphabet (as a java object) from an LDA sampler
-
-    Parameters
-    ----------
-    lda : [type]
-        the dataset to query
-
-    Returns
-    -------
-        Lcc/mallet/types/Alphabet
-    """
-    return lda.getAlphabet()
-
-def get_theta_estimate(lda):
-    """Get an estimate of the document topic distribution
-
-    Parameters
-    ----------
-    lda : LDASampler
-        LDA sampler
-
-    Returns
-    -------
-    "[[D"
-        The theta matrix) from an LDA sampler
-    """
-    theta = lda.getThetaEstimate(lda) # ,simplify = TRUE)
-    return theta
-
-def get_z_means(lda):
-    """Get the mean of the topic indicators from an LDA sampler
-
-    Parameters
-    ----------
-    lda : LDASampler
-        LDA sampler
-
-    Returns
-    -------
-    "[[D"
-    """
-    zb = lda.getZbar(lda) # ,simplify = TRUE)
-    return zb
-
-def get_type_topics(lda):
-    """Get the type/topic matrix from and LDA sampler
-
-    Parameters
-    ----------
-    lda : LDASampler
-        LDA sampler
-
-    Returns
-    -------
-    [[I
-        the type/topic matrix
-    """
-    ttm = lda.getTypeTopicMatrix() # ",simplify = TRUE)
-    return ttm
-
-def get_phi(lda):
-    """Get the word/topic distribution (phi matrix) from an LDA sampler
-
-    Parameters
-    ----------
-    lda : LDASampler
-        LDA sampler
-
-    Returns
-    -------
-    [[D
-        Phi matrix
-    """
-    phi = lda.getPhi() # ",simplify = TRUE)
-    return phi
-
-def get_topwords(lda,nr_words=20):
-    """Get the top words per topic from an LDA sampler
-
-    Parameters
-    ----------
-    lda : LDASampler
-        LDA sampler
-    nr_words : int, optional
-        Number of top words per topic to retrieve, by default 20
-
-    Returns
-    -------
-    "[[Ljava/lang/String;"
-        Per topic top words matrix
-    """
-    util = get_util()
-    alph = lda.getAlphabet()
-    typeTopicMatrix = lda.getTypeTopicMatrix() # ", simplify = TRUE)
-    alphSize = alph.size()
-    nrTopics = lda.getNoTopics()
-
-    tw = util.getTopWords(
-                java.lang.Integer(nr_words),
-                java.lang.Integer(alphSize),
-                java.lang.Integer(nrTopics),
-                typeTopicMatrix, #dispatch = T),
-                alph) #,
-                # simplify = TRUE)
-
-    return tw
-
-def get_top_relevance_words(lda, config, nr_words=20, lambda_value=0.6):
-    """Get the 'top relevance words' (weighted version of top words) per topic from an LDA sampler
-
-    Parameters
-    ----------
-    lda : LDASampler
-        LDA sampler
-    config : [type]
-        LDA config object
-    nr_words : int, optional
-        Number of top words per topic to retrieve, by default 20
-    lambda_value : float, optional
-        Lambda value to use when calculating the relevance, by default 0.6
-    """
-    util = get_util()
-    alph = lda.getAlphabet()
-    typeTopicMatrix = lda.getTypeTopicMatrix() # ", simplify = TRUE)
-    alphSize = alph.size()
-    nrTopics = lda.getNoTopics()
-    beta = config.getBeta(java.lang.Double(0.01)).doubleValue()
-
-    rw = util.getTopRelevanceWords(
-                java.lang.Integer(nr_words),
-                java.lang.Integer(alphSize),
-                java.lang.Integer(nrTopics),
-                typeTopicMatrix, #dispatch = T),
-                java.lang.Double(beta),
-                java.lang.Double(lambda_value),
-                alph) #,
-                # simplify = TRUE)
-    rw
-
-def calculate_ttm_density(typeTopicMatrix):
-    """Calculate the density (sparsity) of the type topic matrix
-
-    Parameters
-    ----------
-    typeTopicMatrix : [type]
-        Type topic matrix, obtained by 'get_type_topics(lda)'
-
-    Returns
-    -------
-    [type]
-        [description]
-    """
-    util = get_util()
-    return util.calculateMatrixDensity(typeTopicMatrix) # ,dispatch = T)
-
-def get_log_likelihood(lda):
-    """]Extract the log likelihood for each iteration
-
-    Parameters
-    ----------
-    lda : LDASampler
-        LDA sampler, the trained lda model
-
-    Returns
-    -------
-    Double
-        Log likelihood
-    """
-    ll = lda.getLogLikelihood(simplify=True)
-    return ll
-
-def get_held_out_log_likelihood(lda):
-    """Extracts the heldout log likelihood for each iteration.
-    The sampler must have been run with a test set
-
-    Parameters
-    ----------
-    lda : LDASampler
-        LDA sampler, the trained lda model
-
-    Returns
-    -------
-    Double
-        Log likelihood for test set
-    """
-    ll = lda.getHeldOutLogLikelihood(simplify=True)
-    return ll
-
-#' run_gc
-#'
-#' Runs the garbage collectors in both R (first) and Java
-#'
-#' @param ... any arguments to gc
-#'
-#' @importFrom rJava J
-#' @export
-# run_gc <- function(...) {
-#   gc(...)
-#   J("java.lang.Runtime")$getRuntime()$gc()
-#   invisible()
-# }
-
-
-def print_build_info():
-    pass
-    # print("We have: ?? processors avaiable")
-    # buildVer = LoggingUtils.getManifestInfo("Implementation-Build","PCPLDA")
-    # implVer  = LoggingUtils.getManifestInfo("Implementation-Version", "PCPLDA")
-    # if buildVer==None or implVer==None:
-    #     System.out.println("GIT info:" + LoggingUtils.getLatestCommit());
-    # } else {
-    #     System.out.println("Build info:"
-    #             + "Implementation-Build = " + buildVer + ", "
-    #             + "Implementation-Version = " + implVer);
