@@ -11,10 +11,10 @@ def get_util():
     util = javabridge.JClassWrapper("cc.mallet.util.LDAUtils")
     return util
 
-def get_logging_utils(output_path=None):
+def create_logging_utils(output_folder=None):
     logging_util = javabridge.JClassWrapper("cc.mallet.util.LoggingUtils")()
-    if not output_path is None:
-        logging_util.checkAndCreateCurrentLogDir(output_path)
+    if not output_folder is None:
+        logging_util.checkAndCreateCurrentLogDir(output_folder)
     return logging_util
 
 def create_lda_sampler(lda_config, model_class_name):
@@ -57,29 +57,30 @@ def create_simple_lda_config(**kwargs):
     """
 
     timestamp = utility.get_timestamp2()
-    output_path = os.path.join("output", f"run_{timestamp}", "")
+    output_folder = os.path.join("output", f"run_{timestamp}", "")
+    logging_util = create_logging_utils(output_folder)
 
-    slc = javabridge.JClassWrapper("cc.mallet.configuration.SimpleLDAConfiguration")()
+    lda_config = javabridge.JClassWrapper("cc.mallet.configuration.SimpleLDAConfiguration")()
 
-    slc.setLoggingUtil(get_logging_utils(output_path))
+    lda_config.setLoggingUtil(logging_util)
 
-    slc.setNoTopics(kwargs.get("nr_topics", 20))
-    slc.setAlpha(jdbl(kwargs.get("alpha", 0.01)))
-    slc.setBeta(jdbl(kwargs.get("beta", kwargs.get("nr_topics", 20) / 50.0)))
-    slc.setNoIters(jint(kwargs.get("iterations", 2000)))
-    slc.setRareThreshold(jint(kwargs.get("rareword_threshold", 10)))
-    slc.setTopicInterval(jint(kwargs.get("topic_interval", 10)))
-    slc.setStartDiagnostic(jint(90))
-    slc.setNoBatches(jint(5))
-    slc.setStoplistFilename(kwargs.get("stoplist_filename", "stoplist.txt"))
-    slc.setTopicPriorFilename(kwargs.get("topic_priors", "topic_priors.txt"))
-    slc.setDatasetFilename(kwargs.get("dataset_filename", "corpus.txt"))
-    slc.setHyperparamOptimInterval(jint(kwargs.get("optim_interval", -1)))
-    slc.setNoPreprocess(kwargs.get("no_preprocess", True))
+    lda_config.setNoTopics(kwargs.get("nr_topics", 20))
+    lda_config.setAlpha(jdbl(kwargs.get("alpha", 0.01)))
+    lda_config.setBeta(jdbl(kwargs.get("beta", kwargs.get("nr_topics", 20) / 50.0)))
+    lda_config.setNoIters(jint(kwargs.get("iterations", 2000)))
+    lda_config.setRareThreshold(jint(kwargs.get("rareword_threshold", 10)))
+    lda_config.setTopicInterval(jint(kwargs.get("topic_interval", 10)))
+    lda_config.setStartDiagnostic(jint(90))
+    lda_config.setNoBatches(jint(5))
+    lda_config.setStoplistFilename(kwargs.get("stoplist_filename", "stoplist.txt"))
+    lda_config.setTopicPriorFilename(kwargs.get("topic_priors", "topic_priors.txt"))
+    lda_config.setDatasetFilename(kwargs.get("dataset_filename", "corpus.txt"))
+    lda_config.setHyperparamOptimInterval(jint(kwargs.get("optim_interval", -1)))
+    lda_config.setNoPreprocess(kwargs.get("no_preprocess", True))
 
-    logger.info("Logging to: " + output_path)
+    logger.info("Logging to: " + output_folder)
 
-    return slc
+    return lda_config
 
 def load_lda_dataset(filename, lda_config):
     """Loads an LDA dataset from file.
