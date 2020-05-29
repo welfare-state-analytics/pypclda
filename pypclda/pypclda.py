@@ -566,7 +566,7 @@ def compute_token_probabilities_given_topic(type_topic_counts, beta):
 
     return p_w_k
 
-def compute_token_relevance_matrix(type_topic_counts_matrix, beta, _lambda):
+def compute_token_relevance_matrix(type_topic_counts_matrix, beta, vlambda):
     """Calculates token relevances matrix.
 
     This is a port of cc.mallet.util.LDAUtils.getTopRelevanceWords
@@ -577,7 +577,7 @@ def compute_token_relevance_matrix(type_topic_counts_matrix, beta, _lambda):
         LDA type/topic counts
     beta : double
         beta value used by sampler
-    _lambda : double
+    vlambda : double
         lambda value used in calculation
 
     Returns
@@ -592,13 +592,10 @@ def compute_token_relevance_matrix(type_topic_counts_matrix, beta, _lambda):
     p_w_k    = compute_token_probabilities_given_topic(type_topic_counts_matrix, beta)
     p_w      = compute_token_probabilities(type_topic_counts_matrix , beta)
 
-    relevance_matrix = [
-        _lambda * np.log(p_w_k[:,topic]) + (1 - _lambda) * (np.log(p_w_k[:,topic]) - np.log(p_w))
-            for topic in range(0, n_topics)
-    ]
+    relevance_matrix = (vlambda * np.log(p_w_k) + (1.0 - vlambda) * (np.log(p_w_k) - np.log(p_w[:, None]))).T
 
-    return np.array(relevance_matrix)
-import math
+    return relevance_matrix
+
 def compute_distinctiveness_matrix(p_w_k, p_w):
     """Calculate word distinctiveness as defined in:
             Termite: Visualization Techniques for Assessing Textual Topic Models
@@ -618,32 +615,10 @@ def compute_distinctiveness_matrix(p_w_k, p_w):
     double[][] size #words x #topics
         word distinctiveness for all word & topics
     """
-    pass
 
-    n_topics = len(p_w_k[0])
-    n_types  = len(p_w_k)
+    distinctiveness_matrix = p_w_k * np.log(p_w_k / p_w[:, None])
 
-    # distinctiveness_matrix = [
-    #     (p_w_k[:,topic] * np.log(p_w_k[:,topic])) / p_w
-    #         for topic in range(0, n_topics)
-    # ]
-
-    distinctiveness_matrix2 = [
-        p_w_k[w,:] * np.log(p_w_k[w,:] / p_w[w])
-            for w in range(0, n_types)
-    ]
-
-    # distinctiveness_matrix3 = []
-    # for w in range(0, n_types):
-    #     row = []
-    #     for k in range(0, n_topics):
-    #         d = p_w_k[w,k] * math.log(p_w_k[w,k] / p_w[w])
-    #         row.append(d)
-    #     distinctiveness_matrix3.append(row)
-
-    distinctiveness_matrix4 = p_w_k * np.log(p_w_k / p_w[:, None])
-    
-    return distinctiveness_matrix4
+    return distinctiveness_matrix
 
 def get_top_distinctive_topic_tokens(sampler, config, n_words):
     """Returns the 'top distinctive words' as defined in:
