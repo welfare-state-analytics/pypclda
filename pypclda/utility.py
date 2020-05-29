@@ -27,6 +27,11 @@ def get_timestamp():
 def get_timestamp2():
     return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
+def get_jars_classpath():
+    lib_path = os.path.join(os.getcwd(), "pypclda", "lib")
+    jar_files = [ os.path.join(lib_path, jar_file) for jar_file in os.listdir(lib_path) ]
+    return jar_files
+
 MODEL_CLASS_NAME_MAP = {
     ADLDA_MODEL: "cc.mallet.topics.ADLDA",
     UNCOLLAPSED_MODEL: "cc.mallet.topics.UncollapsedParallelLDA",

@@ -24,9 +24,9 @@ W_d,w       identities of word w in document d
 
 logger = utility.get_logger()
 
-PCPLDA_JAR_PATH = os.path.join(os.getcwd(), "lib", "PCPLDA-8.5.1.jar")
+#PCPLDA_JAR_PATH = os.path.join(os.getcwd(), "pypclda", "lib", "PCPLDA-8.5.1.jar")
 
-jpype.startJVM(classpath=[PCPLDA_JAR_PATH], convertStrings=False)
+jpype.startJVM(classpath=utility.get_jars_classpath(), convertStrings=False)
 
 cc = jpype.JPackage("cc")
 java = jpype.JPackage("java")
@@ -36,11 +36,12 @@ lda_util = cc.mallet.util.LDAUtils()
 get_util = lambda: lda_util
 jint = lambda n: java.lang.Integer(n)
 jdbl = lambda d: java.lang.Double(d)
+jstr = lambda s: java.lang.String(s)
 
 def create_logging_utils(output_folder=None):
     logging_util = cc.mallet.util.LoggingUtils()
     if not output_folder is None:
-        logging_util.checkAndCreateCurrentLogDir(JString(output_folder))
+        logging_util.checkAndCreateCurrentLogDir(jstr(output_folder))
     return logging_util
 
 def create_simple_lda_config(**kwargs):
