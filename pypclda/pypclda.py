@@ -8,6 +8,20 @@ import jpype
 import jpype.imports
 from jpype.types import *
 
+"""Legend
+K	        Number of topics (k index)
+V	        Size of vocabulary
+M	        Number of documents (d index)
+N_d         Number of words in a document d
+N	        Total number of words in all documents
+alpha_k     prior weight of topic k in a document;
+beta_w	    prior weight of word w in a topic
+phi_k,w     probability of word w occurring in topic k, matrix
+theta_k,d	probability of topic k occurring in document d, K x M
+Z_w,d       identities of all assigned topics for word w in document d
+W_d,w       identities of word w in document d
+"""
+
 logger = utility.get_logger()
 
 PCPLDA_JAR_PATH = os.path.join(os.getcwd(), "lib", "PCPLDA-8.5.1.jar")

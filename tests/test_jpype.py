@@ -366,16 +366,16 @@ def test_compute_token_relevance_matrix():
     sampler = fixture.fixture_sampler()
 
     beta = config.getBeta(config_default.BETA_DEFAULT)
+    vlambda = config.getLambda(config_default.LAMBDA_DEFAULT)
     type_topic_counts = pypclda.get_token_topic_matrix(sampler)
     n_types = len(type_topic_counts)
     n_topics = len(type_topic_counts[0])
-    v_lambda = config.getLambda(config_default.LAMBDA_DEFAULT)
 
     # Act
-    token_relevance_matrix_python = pypclda.compute_token_relevance_matrix(type_topic_counts, beta, v_lambda)
+    token_relevance_matrix_python = pypclda.compute_token_relevance_matrix(type_topic_counts, beta, vlambda)
 
     # Assert
-    token_relevance_matrix_java = __java_compute_token_relevance_matrix(n_types, n_topics, type_topic_counts, beta, v_lambda)
+    token_relevance_matrix_java = __java_compute_token_relevance_matrix(n_types, n_topics, type_topic_counts, beta, vlambda)
     token_relevance_matrix_java = np.array([ list(x) for x in token_relevance_matrix_java ])
 
     assert np.allclose(token_relevance_matrix_java, token_relevance_matrix_python, rtol=1e-10)
