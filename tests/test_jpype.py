@@ -7,19 +7,24 @@ import types
 import numpy as np
 import pypclda
 import pypclda.config_default as config_default
+import pypclda.utility as utility
 import tests.fixture as fixture
-
-PCPLDA_JAR_PATH = os.path.join(os.getcwd(), "lib", "PCPLDA-8.5.1.jar")
 
 import jpype
 import jpype.imports
 from jpype.types import *
 
-# jpype.startJVM(classpath=[PCPLDA_JAR_PATH])
-
 cc = jpype.JPackage("cc")
 java = jpype.JPackage("java")
 
+jint = lambda n: java.lang.Integer(n)
+jdbl = lambda d: java.lang.Double(d)
+jstr = lambda s: java.lang.String(s)
+
+def test_get_jars_classpath():
+    paths = utility.get_jars_classpath()
+    assert paths is not None
+    assert len(paths) > 0
 
 def test_create_lda_util():
     util = pypclda.get_util()
@@ -36,7 +41,7 @@ def test_create_lda_config():
         alpha=0.05,
         beta=0.001
     )
-    config = pypclda.create_simple_lda(args)
+    config = pypclda.create_simple_lda_config(**args)
     assert config is not None
     assert args["nr_topics"] == config.getNoTopics()
 
