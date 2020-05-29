@@ -4,11 +4,11 @@ url = "https://pypi.org/simple"
 verify_ssl = true
 
 [dev-packages]
-pytest = "*"
+rope = "*"
+pytest = "==4.0"
 
 [packages]
 py4j = "*"
-javabridge = "*"
 jpype1 = "*"
 jupyterlab = "*"
 notebook = "*"
