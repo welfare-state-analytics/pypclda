@@ -352,6 +352,21 @@ def extract_vocabulary(alphabet):
     """
     return cc.mallet.util.LDAUtils().extractVocabulaty(alphabet)
 
+def extract_id2token(alphabet):
+    """[summary] Extract the vocabulary as an id-to-token dictionary
+
+    Parameters
+    ----------
+    alphabet : cc.mallet.types.Alphabet
+        Java MALLET Alphabet object, obtained by 'get_alphabet(sampler)'
+
+    Returns
+    -------
+    [type]
+        Vocabulary
+    """
+    return { i: w for i,w in enumerate(extract_vocabulary(alphabet)) }
+
 def extract_token_counts(dataset):
     """Extract how many times each token occurs. Same order as the vocabulary
 
@@ -445,7 +460,61 @@ def get_topic_token_phi_matrix(sampler):
     phi = sampler.getPhi()
     return phi
 
-def calculate_token_probs(type_topic_counts, beta):
+def get_top_topic_tokens(sampler, n_words=20):
+    """Get the top words per topic from an LDA sampler
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+    n_words : int, optional
+        Number of top words per topic to return, default 20
+
+    Returns
+    -------
+    "[[Ljava/lang/String;"
+        Per topic top words matrix
+    """
+    alphabet = sampler.getAlphabet()
+    token_topic_matrix = sampler.getTypeTopicMatrix()
+    alphabet_size = alphabet.size()
+    n_topics = sampler.getNoTopics()
+
+    top_topic_words = cc.mallet.util.LDAUtils.getTopWords(
+                jint(n_words),
+                jint(alphabet_size),
+                jint(n_topics),
+                token_topic_matrix, #dispatch = T),
+                alphabet)
+
+    return [ str(x) for x in top_topic_words ]
+
+def get_top_topic_tokens2(sampler, n_words=20):
+    """Returns top tokens (and their counts) per tipic.
+
+    Sorted based on topic token count
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+    n_words : int, optional
+        Number of top words per topic to return, default 20
+
+    Returns
+    -------
+    list of (str, int) lists
+        A list of tuples (word, count) in descending order
+            for each topic
+    """
+
+    return utility.extract_top_tokens_descending(
+        np.array(sampler.getTypeTopicMatrix()).T,
+        n_words,
+        sampler.getAlphabet()
+    )
+
+def compute_token_probabilities(type_topic_counts, beta):
     """Computes token's overall probability
 
     Parameters
@@ -470,7 +539,7 @@ def calculate_token_probs(type_topic_counts, beta):
 
     return token_probs
 
-def calculate_token_probs_given_topic(type_topic_counts, beta):
+def compute_token_probabilities_given_topic(type_topic_counts, beta):
     """Compute token's probability given topic.
 
     This is a port of LDAUtil.calcWordProbGivenTopic()
@@ -497,8 +566,8 @@ def calculate_token_probs_given_topic(type_topic_counts, beta):
 
     return p_w_k
 
-def calculate_token_relevance_matrix(type_topic_counts_matrix, beta, _lambda):
-    """Calculates token relevances matix.
+def compute_token_relevance_matrix(type_topic_counts_matrix, beta, _lambda):
+    """Calculates token relevances matrix.
 
     This is a port of cc.mallet.util.LDAUtils.getTopRelevanceWords
 
@@ -520,76 +589,195 @@ def calculate_token_relevance_matrix(type_topic_counts_matrix, beta, _lambda):
     n_topics = len(type_topic_counts_matrix[0])
     n_types  = len(type_topic_counts_matrix)
 
-    p_w_k    = calculate_token_probs_given_topic(type_topic_counts_matrix, beta)
-    p_w      = calculate_token_probs(type_topic_counts_matrix , beta)
+    p_w_k    = compute_token_probabilities_given_topic(type_topic_counts_matrix, beta)
+    p_w      = compute_token_probabilities(type_topic_counts_matrix , beta)
 
     relevance_matrix = [
         _lambda * np.log(p_w_k[:,topic]) + (1 - _lambda) * (np.log(p_w_k[:,topic]) - np.log(p_w))
             for topic in range(0, n_topics)
     ]
 
-    return relevance_matrix
+    return np.array(relevance_matrix)
+import math
+def compute_distinctiveness_matrix(p_w_k, p_w):
+    """Calculate word distinctiveness as defined in:
+            Termite: Visualization Techniques for Assessing Textual Topic Models
+                by Jason Chuang, Christopher D. Manning, Jeffrey Heer
 
-def calculate_top_relevance_tokens(n_top_tokens, type_topic_counts_matrix, beta, _lambda, alphabet):
+    Port of cc.mallet.util.LDAUtils.calcWordDistinctiveness()
 
-    n_topics = len(type_topic_counts_matrix[0])
-    n_types  = len(type_topic_counts_matrix)
-    n_top_tokens = min(n_top_tokens, n_types)
+    Parameters
+    ----------
+    p_w_k : double[][]
+        p_w_k
+    p_w : double[]
+        p_w probability of a word
 
-    relevance_matrix = np.array(
-        calculate_token_relevance_matrix(type_topic_counts_matrix, beta, _lambda)
-    )
+    Returns
+    -------
+    double[][] size #words x #topics
+        word distinctiveness for all word & topics
+    """
+    pass
 
-    sorted_indices = relevance_matrix.argsort(axis=1)
+    n_topics = len(p_w_k[0])
+    n_types  = len(p_w_k)
 
-    sorted_matrix = relevance_matrix[
-        np.arange(np.shape(relevance_matrix)[0])[:,np.newaxis],
-        sorted_indices
+    # distinctiveness_matrix = [
+    #     (p_w_k[:,topic] * np.log(p_w_k[:,topic])) / p_w
+    #         for topic in range(0, n_topics)
+    # ]
+
+    distinctiveness_matrix2 = [
+        p_w_k[w,:] * np.log(p_w_k[w,:] / p_w[w])
+            for w in range(0, n_types)
     ]
 
-    sliced_indices = np.flip(sorted_indices[:,-n_top_tokens:], axis=1)
-    sliced_matrix = np.flip(sorted_matrix[:,-n_top_tokens:], axis=1)
+    # distinctiveness_matrix3 = []
+    # for w in range(0, n_types):
+    #     row = []
+    #     for k in range(0, n_topics):
+    #         d = p_w_k[w,k] * math.log(p_w_k[w,k] / p_w[w])
+    #         row.append(d)
+    #     distinctiveness_matrix3.append(row)
 
-    descending_token_relevances = (
-        (alphabet.lookupObject(w[1]), w[0])
-            for w in zip(
-                    sliced_matrix.ravel(),
-                    sliced_indices.ravel()
-                )
-    )
-    return [
-        [ w for w in row ]
-            for row in toolz.partition(n_top_tokens, descending_token_relevances)
-    ]
+    distinctiveness_matrix4 = p_w_k * np.log(p_w_k / p_w[:, None])
+    
+    return distinctiveness_matrix4
 
-def get_top_topic_tokens(sampler, n_words=20):
-    """Get the top words per topic from an LDA sampler
+def get_top_distinctive_topic_tokens(sampler, config, n_words):
+    """Returns the 'top distinctive words' as defined in:
+            Termite: Visualization Techniques for Assessing Textual Topic Models
+                by Jason Chuang, Christopher D. Manning, Jeffrey Heer
 
     Parameters
     ----------
     sampler : LDASampler
         LDA sampler
+    config : LDAConfiguration
+        LDA config object
     n_words : int, optional
-        Number of top words per topic to return, default 20
+        Number of (top) words per topic to retrieve, default 20
 
     Returns
     -------
-    "[[Ljava/lang/String;"
-        Per topic top words matrix
+    list of (str, int) lists
+        A list of tuples (word, count) in descending order
+            for each topic
     """
-    alphabet = sampler.getAlphabet()
-    word_topic_matrix = sampler.getTypeTopicMatrix()
-    alphabet_size = alphabet.size()
-    n_topics = sampler.getNoTopics()
 
-    top_topic_words = cc.mallet.util.LDAUtils.getTopWords(
-                jint(n_words),
-                jint(alphabet_size),
-                jint(n_topics),
-                word_topic_matrix, #dispatch = T),
-                alphabet)
+    distinctive_words = cc.mallet.util.LDAUtils.getTopDistinctiveWords(
+        jint(n_words),
+        sampler.getAlphabet().size(),
+        sampler.getNoTopics(),
+        sampler.getTypeTopicMatrix(),
+        config.getBeta(config_default.BETA_DEFAULT),
+        sampler.getAlphabet()
+    )
 
-    return top_topic_words
+    return distinctive_words
+
+def get_top_distinctive_topic_tokens2(sampler, config, n_words):
+    """Returns the 'top distinctive words' as defined in:
+            Termite: Visualization Techniques for Assessing Textual Topic Models
+                by Jason Chuang, Christopher D. Manning, Jeffrey Heer
+
+    This is a port of cc.mallet.util.LDAUtils.getTopDistinctiveWords
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+    config : LDAConfiguration
+        LDA config object
+    n_words : int, optional
+        Number of (top) words per topic to retrieve, default 20
+
+    Returns
+    -------
+    [type]
+        [description]
+    """
+
+    token_topic_count_matrix = sampler.getTypeTopicMatrix()
+
+    beta     = config.getBeta(config_default.BETA_DEFAULT)
+    p_w_k    = compute_token_probabilities_given_topic(token_topic_count_matrix, beta)
+    p_w      = compute_token_probabilities(token_topic_count_matrix, beta)
+
+    distinctiveness_matrix = compute_distinctiveness_matrix(p_w_k, p_w)
+
+    return utility.extract_top_tokens_descending(
+        distinctiveness_matrix,
+        n_words,
+        sampler.getAlphabet()
+    )
+
+def get_top_relevance_topic_tokens(sampler, config, n_words=20, lambdas=None):
+    """Get the 'top relevance words' (weighted version of top words) per topic from an LDA sampler
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+    config : LDAConfiguration
+        LDA config object
+    n_words : int, optional
+        Number of (top) words per topic to retrieve, default 20
+    lambdas : float, optional
+        Lambda value to use when calculating the relevance, default 0.6
+
+    Returns
+    -------
+    list of (str, int) lists
+        A list of tuples (word, count) in descending order
+            for each topic
+    """
+
+    relevance_words = cc.mallet.util.LDAUtils.getTopRelevanceWords(
+        jint(n_words),
+        sampler.getAlphabet().size(),
+        sampler.getNoTopics(),
+        sampler.getTypeTopicMatrix(),
+        config.getBeta(config_default.BETA_DEFAULT),
+        jdbl(lambdas) if lambdas is not None \
+            else config.getLambda(config_default.LAMBDA_DEFAULT),
+        sampler.getAlphabet()
+    )
+
+    return [ [ str(w) for w in ws] for ws in relevance_words ]
+
+def get_top_relevance_topic_tokens2(sampler, config, n_words):
+    """Topic token relevances
+
+    Parameters
+    ----------
+    sampler : LDASampler
+        LDA sampler
+    config : LDAConfiguration
+        LDA config object
+    n_words : int, optional
+        Number of (top) words per topic to retrieve, default 20
+
+    Returns
+    -------
+    list of (str, float64) lists
+        A list of tuples (word, relevance) in descending order
+            for each topic
+    """
+    type_topic_counts_matrix = sampler.getTypeTopicMatrix()
+
+    relevance_matrix = compute_token_relevance_matrix(
+            type_topic_counts_matrix,
+            config.getBeta(config_default.BETA_DEFAULT),
+            config.getLambda(config_default.LAMBDA_DEFAULT)
+        )
+
+    return utility.extract_top_tokens_descending(
+        relevance_matrix,
+        n_words,
+        sampler.getAlphabet()
+    )
 
 def get_theta_estimate(sampler):
     """Get an estimate of the document topic distribution
@@ -622,33 +810,7 @@ def get_z_means(sampler):
     zb = sampler.getZbar(sampler) # ,simplify = TRUE)
     return zb
 
-def get_top_topic_word_relevances(sampler, config, n_top_words=20, v_lambda=None):
-    """Get the 'top relevance words' (weighted version of top words) per topic from an LDA sampler
-
-    Parameters
-    ----------
-    sampler : LDASampler
-        LDA sampler
-    config : LDAConfiguration
-        LDA config object
-    n_words : int, optional
-        Number of (top) words per topic to retrieve, default 20
-    lambda_value : float, optional
-        Lambda value to use when calculating the relevance, default 0.6
-    """
-
-    relevance_words = cc.mallet.util.LDAUtils.getTopRelevanceWords(
-        jint(n_top_words),
-        sampler.getAlphabet().size(),
-        sampler.getNoTopics(),
-        sampler.getTypeTopicMatrix(),
-        config.getBeta(config_default.BETA_DEFAULT),
-        jdbl(v_lambda) if v_lambda is not None else config.getLambda(config_default.LAMBDA_DEFAULT),
-        sampler.getAlphabet()
-    )
-    return relevance_words
-
-def calculate_type_topic_matrix_density(type_topic_matrix):
+def compute_type_topic_matrix_density(type_topic_matrix):
     """Calculate the density (sparsity) of the type topic matrix
 
     Parameters

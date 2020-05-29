@@ -1,6 +1,8 @@
 import os
 import datetime
 import logging
+import numpy as np
+import toolz
 
 ADLDA_MODEL = "adlda"
 UNCOLLAPSED_MODEL = "uncollapsed"
@@ -80,3 +82,28 @@ def get_logger(level=logging.DEBUG, log_folder=None, prefix="", suffix="console_
         logger.info("FIXME: set log file handler")
 
     return logger
+
+
+def extract_top_tokens_descending(matrix, n_top_tokens, alphabet):
+
+    sorted_indices = matrix.argsort(axis=1)
+
+    sorted_matrix = matrix[
+        np.arange(np.shape(matrix)[0])[:,np.newaxis],
+        sorted_indices
+    ]
+
+    n_top_tokens = min(n_top_tokens, len(matrix[0]))
+
+    sliced_indices = np.flip(sorted_indices[:,-n_top_tokens:], axis=1)
+    sliced_matrix = np.flip(sorted_matrix[:,-n_top_tokens:], axis=1)
+
+    zipped_tokens = (
+        (str(alphabet.lookupObject(w[1])), w[0])
+            for w in zip(
+                    sliced_matrix.ravel(),
+                    sliced_indices.ravel()
+                )
+    )
+    return [ [ w for w in row ] for row in toolz.partition(n_top_tokens, zipped_tokens)]
+
